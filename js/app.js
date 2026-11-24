@@ -1192,9 +1192,11 @@ const RELAY_URL = 'https://poseai-relay.ikongjyj11.workers.dev';
     chatBox.appendChild(p);
   }
 
+  let faqList = [];
   fetch('data/faq.json')
     .then(res => res.json())
     .then(list => {
+      faqList = list;
       list.forEach(item => {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -1232,7 +1234,7 @@ const RELAY_URL = 'https://poseai-relay.ikongjyj11.workers.dev';
   // AI 모델 목록 (worker.js의 MODELS와 id가 같아야 함)
   const AI_MODELS = [
     { group: 'Google Gemini' },
-    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', desc: '빠르고 답변 품질도 좋아요' }
+    { id: 'gemini-3.8-flash', name: 'Gemini Flash-Lite', desc: '빠르고 덜 붐벼요' }
   ];
   const MODEL_STORE = 'poseai_ai_model';
   const modelBtn = document.getElementById('model-btn');
@@ -1305,12 +1307,40 @@ const RELAY_URL = 'https://poseai-relay.ikongjyj11.workers.dev';
     const low = d.toLowerCase();
     if (err.message === 'network') return ['인터넷이나 중계 서버(Cloudflare) 연결 문제예요.', 'Cloudflare 주소가 맞는지, ALLOW_ORIGIN이 내 사이트 주소인지 확인해 주세요.'];
     if (err.message === 'bad') return ['중계 서버 코드에서 오류가 났어요.', 'Cloudflare에 최신 worker.js를 붙여넣고 배포했는지 확인해 주세요.'];
-    if (low.includes('key 없음') || low.includes('키가 설정')) return ['중계 서버에 AI 키가 없어요.', 'Cloudflare 설정 → 변수 및 비밀에 GEMINI_KEY를 넣어 주세요.'];
+    if (low.includes('high demand') || low.includes('503') || low.includes('unavailable') || low.includes('overloaded')) return ['구글 AI 서버가 지금 붐벼요.', '잠시 뒤 다시 해 주세요.'];
+    if (low.includes('location is not supported')) return ['중계 서버 위치에서 Gemini를 쓸 수 없어요.', 'Cloudflare 설정 → 런타임 → 배치를 미국 지역으로 해 주세요.'];
+    if (low.includes('gemini_key 없음') || low.includes('키가 설정')) return ['중계 서버에 AI 키가 없어요.', 'Cloudflare 설정 → 변수 및 비밀에 GEMINI_KEY를 넣어 주세요.'];
     if (low.includes('api key') || low.includes('api_key') || low.includes('invalid') || low.includes('unauthenticated') || low.includes('401')) return ['AI 키가 맞지 않아요.', '키를 다시 복사해서 넣거나, 키를 준 곳에 사용 가능한지 물어봐 주세요.'];
     if (low.includes('quota') || low.includes('insufficient') || low.includes('billing') || low.includes('429') || low.includes('rate')) return ['AI 사용량 한도를 넘었거나 결제가 필요한 상태예요.', '잠시 뒤 다시 해 주세요.'];
     if (low.includes('permission') || low.includes('403') || low.includes('denied')) return ['이 키로는 이 모델을 쓸 권한이 없어요.', 'Google AI Studio에서 키를 다시 확인해 주세요.'];
     if (low.includes('not found') || low.includes('404') || low.includes('does not exist')) return ['AI 모델을 찾을 수 없어요.', '중계 서버(worker.js)의 모델 이름을 확인해 주세요.'];
     return ['AI 답변을 불러오지 못했어요.', '잠시 후 다시 해 주세요.'];
+  }
+
+  // AI가 답을 못 할 때 대신 보여 줄 답 (전시 중 오류 문장 대신)
+  const DEBUG = new URLSearchParams(location.search).has('debug');
+  const TIPS = [
+    { k: ['거북목', '목', '고개', '턱'], a: '턱을 뒤로 살짝 당겨 귀와 어깨가 일직선이 되게 해 보세요. 그 자세로 5초씩, 10번 반복하면 목 뒤가 편해져요. 아프면 바로 멈추세요.' },
+    { k: ['어깨', '기울', '한쪽'], a: '양쪽 어깨를 귀 쪽으로 올렸다가 뒤로 돌리며 천천히 내려 보세요. 10번 반복하고, 가방은 양쪽으로 번갈아 메는 게 좋아요.' },
+    { k: ['허리', '구부정', '등', '상체', '앉'], a: '엉덩이를 의자 깊숙이 넣고 등을 등받이에 붙여 보세요. 30~50분마다 일어나 허리를 펴 주면 좋아요.' },
+    { k: ['골반', '다리'], a: '다리를 꼬지 말고 양발을 바닥에 붙여 앉아 보세요. 한쪽 무릎을 꿇고 상체를 앞으로 밀어 허벅지 앞쪽을 20초씩 늘려 주면 좋아요.' }
+  ];
+  function fallbackAnswer(q) {
+    const words = q.replace(/[?？!.,]/g, ' ').split(/\s+/).filter(w => w.length >= 2);
+    let best = null, score = 0;
+    faqList.forEach(f => {
+      const n = words.filter(w => f.q.includes(w) || f.q.includes(w.slice(0, 2))).length;
+      if (n > score) { score = n; best = f; }
+    });
+    if (best && score >= 2) return best.a;
+    const tip = TIPS.find(t => t.k.some(k => q.includes(k)));
+    if (tip) return tip.a;
+    return '지금은 AI 코치가 바빠서 기본 팁을 알려 드릴게요. 모니터를 눈높이에 맞추고, 30~50분마다 일어나 목과 어깨를 풀어 주세요. 아프면 무리하지 마세요.';
+  }
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  function isBusy(err) {
+    const d = String(err.detail || err.message || '').toLowerCase();
+    return d.includes('high demand') || d.includes('503') || d.includes('unavailable') || d.includes('overloaded');
   }
 
   aiForm.addEventListener('submit', async e => {
@@ -1329,7 +1359,17 @@ const RELAY_URL = 'https://poseai-relay.ikongjyj11.workers.dev';
 
     const t0 = performance.now();
     try {
-      const data = await askAI(q);
+      let data, lastErr;
+      for (let i = 0; i < 3; i++) {          // 붐비면 잠깐 쉬었다가 최대 3번까지
+        try { data = await askAI(q); lastErr = null; break; }
+        catch (err) {
+          lastErr = err;
+          if (!isBusy(err) || i === 2) break;
+          thinking.textContent = '사람이 많아서 조금만 기다려 주세요...';
+          await sleep(1500 * (i + 1));
+        }
+      }
+      if (lastErr) throw lastErr;
       if (data === null) {
         thinking.textContent = 'AI 코치는 준비 중이에요. 그동안은 위의 질문 버튼을 눌러 보세요.';
       } else {
@@ -1344,6 +1384,11 @@ const RELAY_URL = 'https://poseai-relay.ikongjyj11.workers.dev';
       }
     } catch (err) {
       console.error(err);
+      if (!DEBUG) {                          // 전시 화면: 오류 대신 FAQ/기본 팁으로 답
+        thinking.textContent = fallbackAnswer(q);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        return;
+      }
       const [why, how] = explainAIError(err);
       thinking.textContent = `${why} ${how}`;
       // 실제 오류 문장 (캡처해서 원인 찾을 때 쓰기)

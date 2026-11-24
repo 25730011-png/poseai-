@@ -893,3 +893,23 @@ label.set-row { cursor: pointer; }
 .demo-banner { position: relative; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 8px 12px; background: #FBE9DF; color: #9A4320; font-size: 12px; font-weight: 700; }
 .demo-banner button { border: 0; border-radius: 10px; padding: 3px 10px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
 .home-panel .tile.wide + .tile.wide { margin-top: 10px; }
+
+/* ===== v96: 기록 - 공부 중 자세 요약 ===== */
+.sec-link { font-size: 13px; font-weight: 700; color: var(--blue); }
+.sec-title em { font-size: 12px; color: var(--muted); font-weight: 500; }
+.focus-sum { background: #fff; border-radius: 18px; padding: 18px; margin-top: -8px; }
+.fs-main { display: flex; align-items: center; gap: 16px; }
+.fs-ring { --c: var(--blue); flex: none; width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(closest-side, #fff 78%, transparent 79%), conic-gradient(var(--c) calc(var(--p) * 1%), #E7EEE0 0); }
+.fs-ring.lv-warn { --c: #E2683A; } .fs-ring.lv-check { --c: #B8432F; }
+.fs-ring b { font: 700 22px Poppins, sans-serif; color: var(--ink); }
+.fs-ring small { font-size: 12px; margin-left: 1px; }
+.fs-title { font-size: 15px; font-weight: 700; }
+.fs-sub { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+.fs-sub em { font-style: normal; color: var(--blue); font-weight: 700; }
+.fs-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.fs-stats div { background: #F4F3EC; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.fs-stats span { font-size: 11px; color: var(--muted); }
+.fs-stats b { font-size: 15px; font-weight: 700; }
+.fs-empty { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.fs-empty a { color: var(--blue); font-weight: 700; }

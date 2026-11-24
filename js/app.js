@@ -1232,19 +1232,14 @@ const RELAY_URL = 'https://poseai-relay.ikongjyj11.workers.dev';
   // AI 모델 목록 (worker.js의 MODELS와 id가 같아야 함)
   const AI_MODELS = [
     { group: 'Google Gemini' },
-    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite', desc: '가장 빨라요' },
-    { id: 'gemini-2.5-flash',      name: 'Gemini 2.5 Flash',      desc: '속도와 답변 품질 중간' },
-    { id: 'gemini-2.5-pro',        name: 'Gemini 2.5 Pro',        desc: '가장 꼼꼼하지만 느려요' },
-    { group: 'OpenAI ChatGPT' },
-    { id: 'gpt-4o-mini',           name: 'GPT-4o mini',           desc: '빠르고 가벼워요' },
-    { id: 'gpt-4.1-mini',          name: 'GPT-4.1 mini',          desc: '속도와 답변 품질 중간' }
+    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', desc: '빠르고 답변 품질도 좋아요' }
   ];
   const MODEL_STORE = 'poseai_ai_model';
   const modelBtn = document.getElementById('model-btn');
   const modelMenu = document.getElementById('model-menu');
   const modelName = document.getElementById('model-name');
   const findModel = id => AI_MODELS.find(m => m.id === id);
-  let currentModel = findModel(localStorage.getItem(MODEL_STORE)) ? localStorage.getItem(MODEL_STORE) : 'gemini-2.5-flash';
+  let currentModel = findModel(localStorage.getItem(MODEL_STORE)) ? localStorage.getItem(MODEL_STORE) : 'gemini-3.8-flash';
 
   function renderModelMenu() {
     modelName.textContent = findModel(currentModel).name;
@@ -1310,12 +1305,12 @@ const RELAY_URL = 'https://poseai-relay.ikongjyj11.workers.dev';
     const low = d.toLowerCase();
     if (err.message === 'network') return ['인터넷이나 중계 서버(Cloudflare) 연결 문제예요.', 'Cloudflare 주소가 맞는지, ALLOW_ORIGIN이 내 사이트 주소인지 확인해 주세요.'];
     if (err.message === 'bad') return ['중계 서버 코드에서 오류가 났어요.', 'Cloudflare에 최신 worker.js를 붙여넣고 배포했는지 확인해 주세요.'];
-    if (low.includes('key 없음') || low.includes('키가 설정')) return ['중계 서버에 AI 키가 없어요.', 'Cloudflare 설정 → 변수 및 비밀에 GEMINI_KEY / OPENAI_KEY를 넣어 주세요.'];
+    if (low.includes('key 없음') || low.includes('키가 설정')) return ['중계 서버에 AI 키가 없어요.', 'Cloudflare 설정 → 변수 및 비밀에 GEMINI_KEY를 넣어 주세요.'];
     if (low.includes('api key') || low.includes('api_key') || low.includes('invalid') || low.includes('unauthenticated') || low.includes('401')) return ['AI 키가 맞지 않아요.', '키를 다시 복사해서 넣거나, 키를 준 곳에 사용 가능한지 물어봐 주세요.'];
-    if (low.includes('quota') || low.includes('insufficient') || low.includes('billing') || low.includes('429') || low.includes('rate')) return ['AI 사용량 한도를 넘었거나 결제가 필요한 상태예요.', '잠시 뒤 다시 하거나 다른 모델을 골라 주세요.'];
-    if (low.includes('permission') || low.includes('403') || low.includes('denied')) return ['이 키로는 이 모델을 쓸 권한이 없어요.', '다른 모델(예: GPT-4o mini)을 골라 보세요.'];
-    if (low.includes('not found') || low.includes('404') || low.includes('does not exist')) return ['고른 모델을 찾을 수 없어요.', '다른 모델을 골라 보세요.'];
-    return ['AI 답변을 불러오지 못했어요.', '잠시 후 다시 해 보거나 다른 모델을 골라 주세요.'];
+    if (low.includes('quota') || low.includes('insufficient') || low.includes('billing') || low.includes('429') || low.includes('rate')) return ['AI 사용량 한도를 넘었거나 결제가 필요한 상태예요.', '잠시 뒤 다시 해 주세요.'];
+    if (low.includes('permission') || low.includes('403') || low.includes('denied')) return ['이 키로는 이 모델을 쓸 권한이 없어요.', 'Google AI Studio에서 키를 다시 확인해 주세요.'];
+    if (low.includes('not found') || low.includes('404') || low.includes('does not exist')) return ['AI 모델을 찾을 수 없어요.', '중계 서버(worker.js)의 모델 이름을 확인해 주세요.'];
+    return ['AI 답변을 불러오지 못했어요.', '잠시 후 다시 해 주세요.'];
   }
 
   aiForm.addEventListener('submit', async e => {
@@ -2204,5 +2199,46 @@ function authMessage(err) {
   });
 
   document.addEventListener('pagechange', e => { if (e.detail === 'settings') render(); });
+  render();
+})();
+
+
+/* =====================================================================
+   17. 기록 화면 - 공부 중 자세 요약 (진단 · 교정 · 예방 연결)
+   - 공부 타이머 기록(poseai_focus)에서 최근 7일만 모아서 보여 줌
+   - 측정(진단) · 스트레칭(교정) 기록 옆에 예방 기록도 같이 보이게
+   ===================================================================== */
+(() => {
+  const box = document.getElementById('focus-sum');
+  if (!box) return;
+  const esc = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function render() {
+    let list = []; try { list = JSON.parse(localStorage.getItem('poseai_focus') || '[]'); } catch (e) {}
+    const from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - 6);
+    const week = list.filter(r => r && r.date && new Date(r.date + 'T00:00:00') >= from);
+    if (!week.length) {
+      box.innerHTML = `<p class="fs-empty">공부 타이머를 쓰면 공부하는 동안의 자세가 여기 쌓여요.<br><a href="#focus">공부 타이머 시작하기 →</a></p>`;
+      return;
+    }
+    const mins = week.reduce((a, r) => a + (+r.min || 0), 0);
+    const pct = Math.round(week.reduce((a, r) => a + (+r.pct || 0) * (+r.min || 0), 0) / Math.max(mins, 1));
+    const alerts = week.reduce((a, r) => a + (+r.alerts || 0), 0);
+    const first = week[0].pct, last = week[week.length - 1].pct;
+    const diff = week.length > 1 ? last - first : 0;
+    const lv = pct >= 80 ? 'good' : pct >= 50 ? 'warn' : 'check';
+    const hours = mins >= 60 ? `${Math.floor(mins / 60)}시간 ${mins % 60 ? (mins % 60) + '분' : ''}` : `${mins}분`;
+    box.innerHTML = `
+      <div class="fs-main">
+        <div class="fs-ring lv-${lv}" style="--p:${pct}"><b>${pct}<small>%</small></b></div>
+        <div><b class="fs-title">공부 중 바른 자세 비율</b>
+          <p class="fs-sub">${diff > 0 ? `처음보다 <em>${diff}%p</em> 좋아졌어요` : diff < 0 ? `처음보다 ${-diff}%p 낮아졌어요. 스트레칭을 같이 해 봐요` : '이 자세를 계속 지켜 봐요'}</p></div>
+      </div>
+      <div class="fs-stats">
+        <div><span>공부</span><b>${esc(week.length)}회</b></div>
+        <div><span>총 시간</span><b>${esc(hours.trim())}</b></div>
+        <div><span>자세 알림</span><b>${esc(alerts)}회</b></div>
+      </div>`;
+  }
+  document.addEventListener('pagechange', e => { if (e.detail === 'history') render(); });
   render();
 })();

@@ -1,11 +1,66 @@
 // ===== PoseAi app.js =====
 // 화면 하나(index.html)에서 쓰는 JavaScript를 전부 이 파일에 모음
-// 순서: 1 공통(기준표·점수·기록 저장) → 2 측정 → 3 리포트 → 4 기록·그래프 → 5 교정 가이드 → 6 화면 전환
+// 순서: 0 예시 데이터 → 1 공통(기준표·기록 저장) → 2 측정 → 3 리포트 → 4 기록·그래프 → 5 교정 가이드 → 6 화면 전환
 // 데이터는 data/ 폴더의 JSON (criteria.json, guide.json, faq.json)
 
 // MediaPipe는 측정 화면에 들어갈 때만 불러옴 (못 불러와도 다른 화면은 정상 작동)
 const VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 let PoseLandmarker = null, FilesetResolver = null, DrawingUtils = null;
+
+
+/* =====================================================================
+   0. 예시 데이터 (설정 → 예시 데이터 보기)
+   - 전시·발표 때 기록이 비어 보이지 않게 4주치 예시 기록을 보여 줌
+   - 켜져 있는 동안 기록 관련 저장 칸만 'demo:' 칸으로 바꿔서 읽고 씀
+     → 내 진짜 기록은 그대로 두고, 끄면 예시 기록만 지워짐
+   ===================================================================== */
+const DEMO_FLAG = 'poseai_demo';
+const DEMO_KEYS = ['poseai_records', 'poseai_latest', 'poseai_done', 'poseai_plan', 'poseai_focus'];
+const rawGet = Storage.prototype.getItem, rawSet = Storage.prototype.setItem, rawRemove = Storage.prototype.removeItem;
+function isDemo() { try { return rawGet.call(localStorage, DEMO_FLAG) === '1'; } catch (e) { return false; } }
+const demoKey = (store, k) => (store === localStorage && DEMO_KEYS.includes(k) && isDemo()) ? 'demo:' + k : k;
+Storage.prototype.getItem = function (k) { return rawGet.call(this, demoKey(this, k)); };
+Storage.prototype.setItem = function (k, v) { return rawSet.call(this, demoKey(this, k), v); };
+Storage.prototype.removeItem = function (k) { return rawRemove.call(this, demoKey(this, k)); };
+
+// 오늘 기준으로 날짜를 만들어서, 언제 켜도 '최근 4주' 기록처럼 보이게 함
+function makeDemoData() {
+  const day = n => { const t = new Date(); t.setDate(t.getDate() - n); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
+  const iso = (n, h) => { const t = new Date(); t.setDate(t.getDate() - n); t.setHours(h, 20, 0, 0); return t.toISOString(); };
+  // 2주마다 측정, 스트레칭하면서 조금씩 좋아지는 흐름
+  const records = [
+    { date: day(29), neck: 21.6, shoulder: -3.8, pelvis: 2.9, savedAt: iso(29, 21) },
+    { date: day(29), neck: 20.8, shoulder: -3.4, pelvis: 2.7, savedAt: iso(29, 21) },
+    { date: day(15), neck: 17.9, shoulder: -2.8, pelvis: 2.3, savedAt: iso(15, 20) },
+    { date: day(3),  neck: 13.8, shoulder: -1.9, pelvis: 1.6, savedAt: iso(3, 22) },
+  ];
+  const latest = { date: day(3), neck: 13.8, shoulder: -1.9, pelvis: 1.6, saved: true };
+  const moves = ['턱 당기기', '가슴 펴기', '옆목 늘리기', '날개뼈 모으기'];
+  // 날짜별 한 동작 수 (4 = 다 함, 0 = 안 함) - 최근으로 올수록 꾸준해짐
+  const pattern = [4, 2, 0, 4, 4, 1, 0, 4, 3, 4, 0, 4, 4, 2, 4, 4, 4, 0, 4, 3, 4, 4, 4, 2, 4, 4, 4, 4, 4];
+  const done = {}, plan = {};
+  pattern.forEach((n, i) => { const d = day(29 - i); plan[d] = 4; if (n) done[d] = moves.slice(0, n); });
+  const focus = [
+    { n: 12, at: '20:10', min: 25, pct: 58, alerts: 9, best: 420 },
+    { n: 9,  at: '21:30', min: 50, pct: 64, alerts: 11, best: 610 },
+    { n: 6,  at: '19:45', min: 25, pct: 71, alerts: 5, best: 700 },
+    { n: 4,  at: '22:05', min: 25, pct: 76, alerts: 4, best: 820 },
+    { n: 2,  at: '20:40', min: 50, pct: 83, alerts: 4, best: 1260 },
+    { n: 1,  at: '21:15', min: 25, pct: 88, alerts: 2, best: 1080 },
+  ].map(f => ({ date: day(f.n), at: f.at, min: f.min, pct: f.pct, alerts: f.alerts, best: f.best }));
+  return { poseai_records: records, poseai_latest: latest, poseai_done: done, poseai_plan: plan, poseai_focus: focus };
+}
+function setDemo(on) {
+  DEMO_KEYS.forEach(k => rawRemove.call(localStorage, 'demo:' + k));
+  if (on) {
+    const data = makeDemoData();
+    DEMO_KEYS.forEach(k => rawSet.call(localStorage, 'demo:' + k, JSON.stringify(data[k])));
+    rawSet.call(localStorage, DEMO_FLAG, '1');
+  } else {
+    rawRemove.call(localStorage, DEMO_FLAG);
+  }
+  document.dispatchEvent(new CustomEvent('demochange', { detail: on }));
+}
 
 
 /* =====================================================================
@@ -19,7 +74,6 @@ let PoseLandmarker = null, FilesetResolver = null, DrawingUtils = null;
 // (사용자 테스트 후 기준 조정할 때 JSON만 고치면 됨)
 //   good: 이 각도 미만이면 양호
 //   warn: 이 각도 미만이면 주의, 이상이면 확인 권장
-//   penalty: 점수 계산할 때 1도당 깎는 점수
 let CRITERIA = null;
 
 const criteriaReady = fetch('data/criteria.json')
@@ -67,7 +121,6 @@ function groupByDate(records) {
       const vals = g.list.map(r => r[k]).filter(hasValue);
       out[k] = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length * 10) / 10 : null;
     });
-    out.score = getTotalScore(out);
     return out;
   }).sort((a, b) => a.date < b.date ? -1 : 1);
 }
@@ -90,9 +143,11 @@ function stretchStatus() {
     return { cls: '', n, total };
   };
 }
-// 다음 측정일: 마지막 측정 4주(28일) 뒤
-// 연구에서도 교정 운동을 4주 한 뒤 각도 변화를 재는 경우가 많아서 4주로 잡음
-const REMEASURE_DAYS = 28;
+// 다음 측정일: 마지막 측정 1~2주 뒤 (설정 화면에서 고름, 기본 2주)
+// 측정은 1~2주에 한 번, 매일은 스트레칭 체크로 습관 관리
+const CYCLE_KEY = 'poseai_cycle';
+let REMEASURE_DAYS = (() => { try { return +localStorage.getItem(CYCLE_KEY) === 7 ? 7 : 14; } catch (e) { return 14; } })();
+const cycleText = () => REMEASURE_DAYS === 7 ? '1주' : '2주';
 function nextMeasure() {
   const latest = getLatest();
   if (!latest) return null;
@@ -113,22 +168,8 @@ function addDays(d, n) {
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
 }
 
-// 항목 점수 = 100 - 측정값 × 감점 계수 (0~100)
-function getItemScore(key, angle) {
-  const score = 100 - Math.abs(angle) * CRITERIA[key].penalty;
-  return Math.max(0, Math.min(100, Math.round(score)));
-}
-
-// 종합 점수 = 측정된 항목 평균 (criteria.json 항목 수만큼)
-function getTotalScore(result) {
-  const keys = Object.keys(CRITERIA).filter(k => hasValue(result[k]));
-  if (keys.length === 0) return 0;
-  const sum = keys.reduce((acc, k) => acc + getItemScore(k, result[k]), 0);
-  return Math.round(sum / keys.length);
-}
-
 // ===== LocalStorage =====
-// 기록 형식: { date: '2026-11-09', neck: 18.4, shoulder: -2.7, pelvis: 1.9, score: 82 }
+// 기록 형식: { date: '2026-11-09', neck: 18.4, shoulder: -2.7, pelvis: 1.9 }  (점수·판정 없이 각도만)
 // shoulder, pelvis: + 오른쪽 낮음, - 왼쪽 낮음
 const RECORD_KEY = 'poseai_records';
 const LATEST_KEY = 'poseai_latest';
@@ -151,7 +192,7 @@ function saveRecord(record) {
   records.push(rec);
   localStorage.setItem(RECORD_KEY, JSON.stringify(records));
   // 로그인 중이면 구글 시트에도 저장 (8. 계정 부분에서 받음)
-  document.dispatchEvent(new CustomEvent('recordsaved', { detail: rec }));
+  if (!isDemo()) document.dispatchEvent(new CustomEvent('recordsaved', { detail: rec }));   // 예시 데이터 모드에선 계정에 안 올림
 }
 
 
@@ -339,8 +380,8 @@ function loop() {
 
     const lm = res.landmarks[0];
     if (lm) {
-      drawer.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#38BDF8', lineWidth: 3 });
-      drawer.drawLandmarks(lm, { color: '#FFFFFF', fillColor: '#1D5FD1', radius: 4 });
+      drawer.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#8DBB97', lineWidth: 3 });
+      drawer.drawLandmarks(lm, { color: '#FFFFFF', fillColor: '#24603F', radius: 4 });
 
       current = calcAngles(lm);
       if (samples) samples.push(current);
@@ -468,7 +509,6 @@ async function autoMeasure() {
     const neck = await runPhase(id, 'side');
 
     const result = { date: localDate(), neck, ...frontResult };
-    result.score = getTotalScore(result);
     saveLatest(result);
     camMsg('측정 완료!', '리포트로 이동해요');
     await wait(1200); check(id);
@@ -598,8 +638,8 @@ document.addEventListener('pagechange', e => {
 
     const next = shortDate(addDays(latest.date, REMEASURE_DAYS));
     $('score-diff').textContent = prev
-      ? `${shortDate(prev.date)} 측정과 비교했어요 · 다음 측정은 4주 뒤 ${next}쯤 추천`
-      : `첫 측정이에요 · 4주 동안 스트레칭하고 ${next}쯤 다시 재서 비교해 보세요`;
+      ? `${shortDate(prev.date)} 측정과 비교했어요 · 다음 측정은 ${cycleText()} 뒤 ${next}쯤 추천`
+      : `첫 측정이에요 · ${cycleText()} 동안 스트레칭하고 ${next}쯤 다시 재서 비교해 보세요`;
 
     $('result-list').innerHTML = KEYS().map(k => cardHTML(k, latest[k])).join('');
 
@@ -706,7 +746,7 @@ document.addEventListener('pagechange', e => {
       ctx.font = 'bold 13px "Noto Sans KR", sans-serif';
       const w = ctx.measureText(text).width + 24, h = 26;
       const x = Math.min(c.chartArea.right - w, pt.x - w / 2), y = Math.max(c.chartArea.top, pt.y - h - 12);
-      ctx.fillStyle = '#1D5FD1';
+      ctx.fillStyle = '#24603F';
       ctx.beginPath(); ctx.roundRect(x, y, w, h, 9); ctx.fill();
       ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
       ctx.fillText(text, x + 12, y + h / 2 + 1);
@@ -732,21 +772,21 @@ document.addEventListener('pagechange', e => {
       data: {
         labels,
         datasets: [{
-          data: values, borderColor: '#1D5FD1', borderWidth: 2.5, tension: 0.25, spanGaps: true,
+          data: values, borderColor: '#24603F', borderWidth: 2.5, tension: 0.25, spanGaps: true,
           pointRadius: values.map((_, i) => i === last ? 5 : 3.5),
-          pointBackgroundColor: values.map((_, i) => i === last ? '#1D5FD1' : '#fff'),
-          pointBorderColor: '#1D5FD1', pointBorderWidth: 2,
-          fill: true, backgroundColor: 'rgba(29,95,209,.06)'
+          pointBackgroundColor: values.map((_, i) => i === last ? '#24603F' : '#fff'),
+          pointBorderColor: '#24603F', pointBorderWidth: 2,
+          fill: true, backgroundColor: 'rgba(36,96,63,.06)'
         }]
       },
       options: {
         maintainAspectRatio: false,
         layout: { padding: { top: 30 } },
         scales: {
-          y: { beginAtZero: true, grace: '15%', border: { display: false }, grid: { color: '#E8EFF7' },
-               ticks: { color: '#8C9CB1', font: { size: 11 }, maxTicksLimit: 5, callback: v => `${v}°` } },
+          y: { beginAtZero: true, grace: '15%', border: { display: false }, grid: { color: '#ECEAE0' },
+               ticks: { color: '#A2A89E', font: { size: 11 }, maxTicksLimit: 5, callback: v => `${v}°` } },
           x: { border: { display: false }, grid: { display: false },
-               ticks: { color: ctx => ctx.index === last ? '#1D5FD1' : '#8C9CB1', font: ctx => ({ size: 11, weight: ctx.index === last ? 'bold' : 'normal' }) } }
+               ticks: { color: ctx => ctx.index === last ? '#24603F' : '#A2A89E', font: ctx => ({ size: 11, weight: ctx.index === last ? 'bold' : 'normal' }) } }
         },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.parsed.y.toFixed(1)}°` } } }
       },
@@ -763,7 +803,7 @@ document.addEventListener('pagechange', e => {
         : d < 0 ? `↘  지난번보다 ${Math.abs(d).toFixed(1)}° 줄었어요` : `↗  지난번보다 ${d.toFixed(1)}° 늘었어요`;
     } else {
       trend.hidden = false;
-      trend.textContent = '4주 동안 스트레칭하고 다시 재면 변화가 보여요';
+      trend.textContent = `${cycleText()} 동안 스트레칭하고 다시 재면 변화가 보여요`;
     }
   }
 
@@ -948,7 +988,7 @@ document.addEventListener('pagechange', e => {
   }
 
   // ----- 오늘의 스트레칭 체크 (매일 들어올 이유) -----
-  // 측정은 4주에 한 번, 스트레칭은 매일 → 한 동작이라도 하면 그날은 '한 날'
+  // 측정은 1~2주에 한 번, 스트레칭은 매일 → 한 동작이라도 하면 그날은 '한 날'
   const DONE_KEY = 'poseai_done';
   const todayStr = () => localDate();
   function doneMap() { try { return JSON.parse(localStorage.getItem(DONE_KEY) || '{}'); } catch (e) { return {}; } }
@@ -1330,7 +1370,7 @@ const RELAY_URL = 'https://poseai-relay.ikongjyj11.workers.dev';
 // 화면이 바뀌면 'pagechange' 이벤트를 보내서 각 화면 JS가 필요할 때 실행되게 함
 //   예) document.addEventListener('pagechange', e => { if (e.detail === 'report') { ... } });
 
-const PAGES = ['home', 'measure', 'report', 'history', 'guide', 'focus', 'faq', 'login', 'signup'];
+const PAGES = ['home', 'measure', 'report', 'history', 'guide', 'focus', 'faq', 'settings', 'login', 'signup'];
 
 function showPage() {
   const id = location.hash.replace('#', '');
@@ -1344,7 +1384,7 @@ function showPage() {
     a.classList.toggle('active', a.getAttribute('href') === '#' + page);
   });
   // 모바일 아래 탭바 (리포트는 '측정', 로그인·회원가입은 '기록' 탭에 불 켜기)
-  const tabPage = { report: 'measure', login: 'history', signup: 'history', faq: 'home', focus: 'home' }[page] || page;
+  const tabPage = { report: 'measure', login: 'history', signup: 'history', faq: 'home', focus: 'home', settings: 'home' }[page] || page;
   document.querySelectorAll('.tabbar a').forEach(a => {
     const on = a.getAttribute('href') === '#' + tabPage;
     a.classList.toggle('active', on);
@@ -1495,7 +1535,7 @@ function authMessage(err) {
     const line = Object.keys(CRITERIA).filter(k => hasValue(latest[k])).map(k => `${short[k] || CRITERIA[k].name} ${Math.abs(latest[k]).toFixed(1)}°`).join(' · ');
     card.href = '#report';
     card.innerHTML = `<span><b>${user ? user.nickname + '님의 최근 기록' : '최근 기록'} · ${md2(latest.date)}</b><small>${line}</small></span>
-      <span class="score">${latest.score}<small>점</small></span>`;
+      <em>리포트 →</em>`;
   }
   const md2 = d => `${+d.slice(5, 7)}.${+d.slice(8, 10)}`;
 
@@ -1862,7 +1902,7 @@ function authMessage(err) {
 /* =====================================================================
    14. 다음 측정 안내
    - 홈 '내 기록' 탭 카드 + 측정 화면 위 안내
-   - 4주가 안 됐으면 막지는 않고 "지금 재면 변화가 잘 안 보일 수 있어요"만 알려 줌
+   - 측정 주기가 안 됐으면 막지는 않고 "지금 재면 변화가 잘 안 보일 수 있어요"만 알려 줌
    ===================================================================== */
 (() => {
   function card() {
@@ -1873,7 +1913,7 @@ function authMessage(err) {
     const pct = Math.min(100, Math.max(0, nm.since / REMEASURE_DAYS * 100));
     box.innerHTML = `<div class="nm-top"><b>다음 측정 ${dday(nm.left)}</b><span>${shortDate(nm.date)}</span></div>
       <i class="bar"><i style="width:${pct}%"></i></i>
-      <small>${nm.left > 0 ? `마지막 측정 후 ${nm.since}일 · 그동안 스트레칭 ${nm.stretched}일 했어요` : `4주가 지났어요. 지금 재면 변화를 볼 수 있어요`}</small>`;
+      <small>${nm.left > 0 ? `마지막 측정 후 ${nm.since}일 · 그동안 스트레칭 ${nm.stretched}일 했어요` : `${cycleText()}가 지났어요. 지금 재면 변화를 볼 수 있어요`}</small>`;
     box.classList.toggle('ready', nm.left <= 0);
     box.href = nm.left <= 0 ? '#measure' : '#guide';
   }
@@ -1884,7 +1924,7 @@ function authMessage(err) {
     if (!nm || nm.left <= 0) { el.hidden = true; return; }
     el.hidden = false;
     el.innerHTML = `<b>마지막 측정 후 ${nm.since}일 지났어요</b>
-      <span>자세는 스트레칭을 4주쯤 꾸준히 해야 변해요. ${shortDate(nm.date)}(${dday(nm.left)})에 재면 변화가 더 잘 보여요. 지금 재도 괜찮아요.</span>`;
+      <span>스트레칭을 ${cycleText()}쯤 꾸준히 하고 ${shortDate(nm.date)}(${dday(nm.left)})에 재면 변화가 더 잘 보여요. 지금 재도 괜찮아요.</span>`;
   }
   document.addEventListener('pagechange', e => {
     if (e.detail === 'home') card();
@@ -1999,7 +2039,7 @@ function authMessage(err) {
     fCtx.clearRect(0, 0, fCanvas.width, fCanvas.height);
     const lm = res.landmarks[0];
     const f = lm && features(lm);
-    if (lm) fDrawer.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: state === 'bad' ? '#F59E0B' : '#38BDF8', lineWidth: 3 });
+    if (lm) fDrawer.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: state === 'bad' ? '#E2683A' : '#8DBB97', lineWidth: 3 });
 
     if (!f) { $('focus-msg').textContent = '얼굴과 양쪽 어깨가 보이게 앉아 주세요'; return; }
 
@@ -2096,4 +2136,73 @@ function authMessage(err) {
     else if (timer) finish(false);     // 다른 화면으로 가면 타이머 끝
   });
   renderHistory();
+})();
+
+
+/* =====================================================================
+   16. 설정 (#settings)
+   - 예시 데이터 보기, 다시 측정 주기(1주/2주), 자세 알림 소리 기본값
+   - 계정(로그인 상태), 이 브라우저 기록 지우기, 서비스 정보
+   ===================================================================== */
+(() => {
+  const $ = id => document.getElementById(id);
+  const SOUND_KEY = 'poseai_sound';
+  const soundOn = () => { try { return localStorage.getItem(SOUND_KEY) !== '0'; } catch (e) { return true; } };
+
+  // 공부 타이머 체크박스도 설정값으로 시작
+  if ($('focus-sound')) $('focus-sound').checked = soundOn();
+
+  function render() {
+    $('set-demo').checked = isDemo();
+    $('demo-banner').hidden = !isDemo();
+    document.querySelectorAll('#set-cycle button').forEach(b => {
+      const on = +b.dataset.days === REMEASURE_DAYS;
+      b.classList.toggle('active', on); b.setAttribute('aria-checked', on);
+    });
+    $('set-sound').checked = soundOn();
+    const user = getUser();
+    $('set-account').textContent = user ? `${user.nickname}님 (아이디 ${user.id}) · 기록이 계정에도 저장돼요` : '게스트로 이용 중이에요 · 기록은 이 브라우저에만 있어요';
+    $('set-login').hidden = !!user;
+    $('set-logout').hidden = !user;
+  }
+
+  // 화면들 다시 그리기 (각 화면은 pagechange 때 그려지므로 현재 화면을 한 번 더 알림)
+  const refresh = () => { render(); document.dispatchEvent(new CustomEvent('pagechange', { detail: document.body.dataset.page || 'home' })); };
+
+  $('set-demo').addEventListener('change', e => { setDemo(e.target.checked); refresh(); });
+  $('demo-off').addEventListener('click', () => { setDemo(false); refresh(); });
+
+  $('set-cycle').addEventListener('click', e => {
+    const b = e.target.closest('button[data-days]'); if (!b) return;
+    REMEASURE_DAYS = +b.dataset.days;
+    try { rawSet.call(localStorage, CYCLE_KEY, String(REMEASURE_DAYS)); } catch (err) {}
+    refresh();
+  });
+
+  $('set-sound').addEventListener('change', e => {
+    try { rawSet.call(localStorage, SOUND_KEY, e.target.checked ? '1' : '0'); } catch (err) {}
+    if ($('focus-sound')) $('focus-sound').checked = e.target.checked;
+  });
+
+  $('set-logout').addEventListener('click', () => { $('sidebar-logout').click(); setTimeout(render, 300); });
+
+  // 기록 지우기: 실수 방지로 두 번 눌러야 지워짐 (진짜 기록만, 예시 데이터는 그대로)
+  let armed = null;
+  $('set-clear').addEventListener('click', e => {
+    const btn = e.currentTarget;
+    if (!armed) {
+      btn.textContent = '한 번 더 누르면 지워져요';
+      btn.classList.add('armed');
+      armed = setTimeout(() => { armed = null; btn.textContent = '이 브라우저 기록 지우기'; btn.classList.remove('armed'); }, 4000);
+      return;
+    }
+    clearTimeout(armed); armed = null;
+    DEMO_KEYS.forEach(k => rawRemove.call(localStorage, k));
+    btn.textContent = '지웠어요'; btn.classList.remove('armed');
+    setTimeout(() => { btn.textContent = '이 브라우저 기록 지우기'; }, 2000);
+    refresh();
+  });
+
+  document.addEventListener('pagechange', e => { if (e.detail === 'settings') render(); });
+  render();
 })();

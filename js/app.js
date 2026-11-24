@@ -1467,6 +1467,8 @@ window.addEventListener('DOMContentLoaded', () => criteriaReady.finally(showPage
   dim.addEventListener('click', closeSidebar);
   document.getElementById('sidebar-close').addEventListener('click', closeSidebar);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
+  // 메뉴가 열린 채로 뒤로 가기 등으로 화면이 바뀌어도 닫기
+  window.addEventListener('hashchange', closeSidebar);
 
   // 메뉴 누르면 닫기 (병원 찾기는 가이드 화면으로 간 뒤 그 위치로 스크롤)
   sidebar.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
